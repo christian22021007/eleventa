@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini Punto de Venta Mejorado</title>
+<style>
+body { font-family: Arial; margin:0; padding:0; background:#f2f2f2; }
+header { background:#FFB300; color:#fff; padding:10px; text-align:center; font-size:20px;}
+nav { display:flex; justify-content:space-around; background:#333; color:#fff;}
+nav button { flex:1; padding:10px; border:none; background:#333; color:white; font-size:16px;}
+nav button.active { background:#FFB300; color:#000;}
+section { padding:10px; display:none;}
+section.active { display:block;}
+button { padding:8px 12px; margin:2px;}
+input, select { padding:6px; margin:4px 0; width:100%;}
+.producto-item, .venta-item { display:flex; justify-content:space-between; margin-bottom:4px; background:#fff; padding:6px; border-radius:4px;}
+.total { font-weight:bold; font-size:18px; margin-top:10px; text-align:right;}
+#ventas-scroll { max-height:300px; overflow-y:auto; margin-bottom:10px; }
+#logo-display { max-height:80px; display:block; margin:auto; margin-bottom:10px; }
+</style>
+</head>
+<body>
+
+<header>Mini Punto de Venta</header>
+
+<nav>
+  <button id="nav-ventas" class="active">Ventas</button>
+  <button id="nav-productos">Productos</button>
+  <button id="nav-config">Configuración</button>
+</nav>
+
+<!-- VENTAS -->
+<section id="ventas" class="active">
+  <img id="logo-display" src="" alt="">
+  <input type="text" id="buscador-ventas" placeholder="Buscar producto...">
+  <div id="ventas-scroll"></div>
+  <div class="total">Total: $<span id="total">0</span></div>
+  <button id="btn-cobrar">Cobrar</button>
+  <button id="btn-imprimir">Imprimir Ticket</button>
+  <button id="btn-reimprimir">Reimprimir Último Ticket</button>
+  <button id="btn-toggle-mayoreo">Cambiar a Mayoreo</button>
+</section>
+
+<!-- PRODUCTOS -->
+<section id="productos">
+  <div id="lista-productos"></div>
+  <input type="text" id="nuevo-nombre" placeholder="Nombre producto">
+  <input type="number" id="nuevo-precio-menudeo" placeholder="Precio menudeo">
+  <input type="number" id="nuevo-precio-mayoreo" placeholder="Precio mayoreo">
+  <button id="btn-agregar-producto">Agregar Producto</button>
+</section>
+
+<!-- CONFIGURACION -->
+<section id="config">
+  <input type="file" id="logo-file" accept="image/*">
+  <button id="btn-cargar-logo">Cargar Logo</button>
+  <img id="logo-preview" style="max-height:80px; display:block; margin-top:10px;">
+  <button id="btn-conectar-impresora">Conectar Impresora</button>
+  <div id="impresora-status"></div>
+  <button id="btn-prueba-impresion">Imprimir Ticket de Prueba</button>
+</section>
+
+<script>
+let productos = [];
+let ventas = [];
+let ultimoTicket = null;
+let usarMayoreo = false;
+let logoBase64 = "";
+let impresora = null;
+
+// Navegación
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.onclick = () => {
+    document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('section').forEach(s => s.classList.remove('active'));
+    document.getElementById(btn.id.replace('nav-', '')).classList.add('active');
+    renderVentas(); renderProductos();
+  }
+});
+
+// Renderizar Productos
+function renderProductos(){
+  const lista = document.getElementById('lista-productos');
+  lista.innerHTML = '';
+  productos.forEach((p,i)=>{
+    let div = document.createElement('div');
+    div.className = 'producto-item';
+    div.innerHTML = `<span>${p.nombre} - Menudeo: $${p.precioM} Mayoreo: $${p.precioMa}</span>
+                     <button onclick="agregarAVenta(${i})">+</button>
+                     <button onclick="quitarProducto(${i})">x</button>`;
+    lista.appendChild(div);
+  });
+}
+
+// Renderizar Ventas con scroll y búsqueda
+function renderVentas(){
+  const lista = document.getElementById('ventas-scroll');
+  const filtro = document.getElementById('buscador-ventas').value.toLowerCase();
+  lista.innerHTML = '';
+  productos.filter(p=>p.nombre.toLowerCase().includes(filtro)).forEach((p,i)=>{
+    let cantidad = ventas.find(v=>v.nombre===p.nombre)?.cantidad || 0;
+    let total = usarMayoreo ? p.precioMa * cantidad : p.precioM * cantidad;
+    let div = document.createElement('div');
+    div.className = 'venta-item';
+    div.innerHTML = `<span>${p.nombre} x${cantidad}</span><span>$${total}</span>
+                     <button onclick="agregarAVenta(${i})">+</button>
+                     <button onclick="quitarVentaNombre('${p.nombre}')">-</button>`;
+    lista.appendChild(div);
+  });
+  document.getElementById('total').innerText = ventas.reduce((a,b)=>a+b.total,0);
+}
+
+// Buscador
+document.getElementById('buscador-ventas').addEventListener('input', renderVentas);
+
+// Agregar producto
+document.getElementById('btn-agregar-producto').onclick = ()=>{
+  let n = document.getElementById('nuevo-nombre').value;
+  let pm = parseFloat(document.getElementById('nuevo-precio-menudeo').value);
+  let pma = parseFloat(document.getElementById('nuevo-precio-mayoreo').value);
+  if(n && pm && pma){
+    productos.push({nombre:n, precioM:pm, precioMa:pma});
+    renderProductos(); renderVentas();
+    document.getElementById('nuevo-nombre').value='';
+    document.getElementById('nuevo-precio-menudeo').value='';
+    document.getElementById('nuevo-precio-mayoreo').value='';
+  }
+}
+
+// Quitar producto
+function quitarProducto(i){ productos.splice(i,1); renderProductos(); renderVentas(); }
+
+// Agregar a venta
+function agregarAVenta(i){
+  let p = productos[i];
+  let precio = usarMayoreo ? p.precioMa : p.precioM;
+  let v = ventas.find(x=>x.nombre===p.nombre);
+  if(v){ v.cantidad++; v.total = v.cantidad * precio;}
+  else ventas.push({nombre:p.nombre,cantidad:1,total:precio});
+  renderVentas();
+}
+
+// Quitar de venta por nombre
+function quitarVentaNombre(nombre){
+  let v = ventas.find(x=>x.nombre===nombre);
+  if(!v) return;
+  v.cantidad--;
+  if(v.cantidad<=0) ventas = ventas.filter(x=>x.nombre!==nombre);
+  else v.total = (usarMayoreo ? productos.find(p=>p.nombre===nombre).precioMa : productos.find(p=>p.nombre===nombre).precioM)*v.cantidad;
+  renderVentas();
+}
+
+// Cambiar Mayoreo
+document.getElementById('btn-toggle-mayoreo').onclick = ()=>{
+  usarMayoreo = !usarMayoreo;
+  renderVentas();
+}
+
+// Cobrar
+document.getElementById('btn-cobrar').onclick = ()=>{
+  if(ventas.length===0){ alert('No hay productos'); return; }
+  ultimoTicket = generarTicket();
+  alert('Cobrado. Total: $'+ventas.reduce((a,b)=>a+b.total,0));
+  ventas = [];
+  renderVentas();
+}
+
+// Imprimir ticket
+document.getElementById('btn-imprimir').onclick = ()=>{
+  if(!ultimoTicket) { alert('No hay ticket'); return; }
+  imprimirTicket(ultimoTicket);
+}
+
+// Reimprimir
+document.getElementById('btn-reimprimir').onclick = ()=>{
+  if(!ultimoTicket) { alert('No hay ticket'); return; }
+  imprimirTicket(ultimoTicket);
+}
+
+// Cargar logo
+document.getElementById('btn-cargar-logo').onclick = ()=>{
+  const file = document.getElementById('logo-file').files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = e => { 
+    logoBase64 = e.target.result; 
+    document.getElementById('logo-display').src = logoBase64;
+    document.getElementById('logo-preview').src = logoBase64;
+    alert('Logo cargado y visible');
+  }
+  reader.readAsDataURL(file);
+}
+
+// Conectar impresora
+document.getElementById('btn-conectar-impresora').onclick = async ()=>{
+  try{
+    const device = await navigator.bluetooth.requestDevice({ filters:[{namePrefix:'Goojprt'}], optionalServices:[0x1811]});
+    const server = await device.gatt.connect();
+    impresora = server;
+    document.getElementById('impresora-status').innerText = 'Impresora conectada: '+device.name;
+  }catch(e){ alert('No se pudo conectar: '+e); }
+}
+
+// Ticket de prueba
+document.getElementById('btn-prueba-impresion').onclick = ()=>{
+  if(!impresora){ alert('No hay impresora conectada'); return; }
+  let ticket = "*** Ticket de prueba ***\nConexión exitosa!";
+  if(logoBase64) ticket = "[LOGO]\n"+ticket;
+  imprimirTicket(ticket);
+}
+
+// Generar ticket
+function generarTicket(){
+  let lines = [];
+  if(logoBase64) lines.push("[LOGO]");
+  lines.push('*** Ticket de Venta ***');
+  ventas.forEach(v=>lines.push(`${v.nombre} x${v.cantidad}  $${v.total}`));
+  let total = ventas.reduce((a,b)=>a+b.total,0);
+  lines.push('Total: $'+total);
+  lines.push('Gracias por su compra');
+  return lines.join('\n');
+}
+
+// Imprimir ticket (simulado, se puede reemplazar por método de la impresora)
+function imprimirTicket(ticket){
+  if(!impresora){ alert('Impresora no conectada'); console.log(ticket); return; }
+  console.log('Ticket enviado a impresora:\n',ticket);
+  alert('Ticket enviado a impresora (simulado)');
+}
+
+// Inicial
+renderProductos();
+renderVentas();
+
+</script>
+</body>
+</html>
